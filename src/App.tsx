@@ -1,6 +1,11 @@
 import { useState } from "react";
 import { getPrediction, type Prediction } from "./services/predictions";
 
+// Arătăm debug doar în dev sau dacă setăm VITE_SHOW_DEBUG=1
+const SHOW_DEBUG =
+  import.meta.env.MODE !== "production" ||
+  import.meta.env.VITE_SHOW_DEBUG === "1";
+
 export default function App() {
   const [fixtureId, setFixtureId] = useState("215662");
   const [data, setData] = useState<Prediction | null>(null);
@@ -30,78 +35,4 @@ export default function App() {
         <form onSubmit={handleFetch} className="flex gap-3 items-center">
           <input
             value={fixtureId}
-            onChange={(e) => setFixtureId(e.target.value)}
-            className="px-3 py-2 border rounded w-52 bg-white"
-            placeholder="ID meci (fixtureId)"
-          />
-          <button
-            type="submit"
-            className="px-4 py-2 rounded bg-black text-white disabled:opacity-50"
-            disabled={loading || !fixtureId}
-          >
-            {loading ? "Se încarcă..." : "Vezi predicțiile"}
-          </button>
-        </form>
-
-        {error && (
-          <div className="p-3 rounded border border-red-300 bg-red-50 text-red-700">
-            {error}
-          </div>
-        )}
-
-        {data && (
-          <div className="p-5 rounded-2xl bg-white shadow">
-            <p className="text-sm text-gray-500 mb-4">
-              Fixture #{data.fixtureId}
-            </p>
-
-            <div className="grid grid-cols-3 gap-6 items-center text-lg">
-              <div className="text-right">
-                <div className="font-semibold">
-                  {data.teams.home ?? "—"}
-                </div>
-                <div className="text-sm text-gray-500">1: {data.oneXTwo.home ?? "—"}</div>
-              </div>
-
-              <div className="text-center text-gray-400">vs</div>
-
-              <div>
-                <div className="font-semibold">
-                  {data.teams.away ?? "—"}
-                </div>
-                <div className="text-sm text-gray-500">2: {data.oneXTwo.away ?? "—"}</div>
-              </div>
-            </div>
-
-            <div className="mt-4 space-y-1 text-sm">
-              <div>X: {data.oneXTwo.draw ?? "—"}</div>
-              <div>Recomandat: {data.oneXTwo.recommended ?? "—"}</div>
-              <div>
-                GG/NG:{" "}
-                {data.bothTeamsToScore
-                  ? `${data.bothTeamsToScore.label} (${data.bothTeamsToScore.confidence})`
-                  : "—"}
-              </div>
-              <div>
-                O/U 2.5:{" "}
-                {data.overUnder25
-                  ? `${data.overUnder25.label} (${data.overUnder25.confidence})`
-                  : "—"}
-              </div>
-            </div>
-
-            {/* Detalii brute – utile pentru debug */}
-            <details className="mt-4">
-              <summary className="cursor-pointer text-sm text-gray-500">
-                Vezi detalii (raw)
-              </summary>
-              <pre className="mt-2 text-xs overflow-auto bg-gray-50 p-3 rounded">
-                {JSON.stringify(data.raw ?? data, null, 2)}
-              </pre>
-            </details>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
+            onChange={(e) => setFixtureId(e.target.val
