@@ -27,6 +27,62 @@ export default function App() {
     }
   }
 
+  // Helpers de afișare (fallback-uri sigure)
+  const ggngDisplay = (p: Prediction | null) => {
+    if (!p) return "—";
+    // 1) dacă avem mapping (label + confidence)
+    if (p.bothTeamsToScore) {
+      return `${p.bothTeamsToScore.label} (${p.bothTeamsToScore.confidence})`;
+    }
+    // 2) fallback: încearcă din raw dacă furnizorul a dat procente pentru BTTS
+    // (structura variază, așa că punem check-uri defensive)
+    const btts =
+      (p as any)?.raw?.predictions?.btts ||
+      (p as any)?.raw?.predictions?.both_teams_to_score ||
+      null;
+
+    if (btts) {
+      const label =
+        btts.label ??
+        (btts.yes ? "GG" : btts.no ? "NGG" : undefined) ??
+        (typeof btts === "string" ? btts : undefined);
+      const percent =
+        btts.percent ??
+        btts.yes_percent ??
+        btts.no_percent ??
+        undefined;
+
+      if (label && percent != null) return `${label} (${percent}%)`;
+      if (label) return label;
+    }
+    return "—";
+  };
+
+  const ou25Display = (p: Prediction | null) => {
+    if (!p) return "—";
+    // 1) mapping
+    if (p.overUnder25) {
+      return `${p.overUnder25.label} (${p.overUnder25.confidence})`;
+    }
+    // 2) fallback: încearcă din raw dacă există câmpuri dedicate O/U
+    const ou =
+      (p as any)?.raw?.predictions?.over_under ??
+      (p as any)?.raw?.predictions?.ou_25 ??
+      null;
+
+    if (ou) {
+      const label =
+        ou.label ??
+        ou.value ??
+        (typeof ou === "string" ? ou : undefined);
+      const percent = ou.percent ?? ou.over_percent ?? ou.under_percent ?? undefined;
+
+      if (label && percent != null) return `${label} (${percent}%)`;
+      if (label) return label;
+    }
+    return "—";
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 text-gray-800">
       <div className="max-w-3xl mx-auto p-6 space-y-6">
@@ -81,20 +137,10 @@ export default function App() {
                 </span>
               </div>
               <div>
-                GG/NG:{" "}
-                <span className="font-semibold">
-                  {data.bothTeamsToScore
-                    ? `${data.bothTeamsToScore.label} (${data.bothTeamsToScore.confidence})`
-                    : "—"}
-                </span>
+                GG/NG: <span className="font-semibold">{ggngDisplay(data)}</span>
               </div>
               <div>
-                O/U 2.5:{" "}
-                <span className="font-semibold">
-                  {data.overUnder25
-                    ? `${data.overUnder25.label} (${data.overUnder25.confidence})`
-                    : "—"}
-                </span>
+                O/U 2.5: <span className="font-semibold">{ou25Display(data)}</span>
               </div>
             </div>
 
