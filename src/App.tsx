@@ -1,8 +1,9 @@
 import { useState } from "react";
+import { getPrediction, PredictResponse } from "./services/predictions";
 
 export default function App() {
   const [fixtureId, setFixtureId] = useState("198772");
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<PredictResponse | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -11,9 +12,7 @@ export default function App() {
     setData(null);
     setLoading(true);
     try {
-      const res = await fetch(`/api/predict?fixture=${fixtureId}`);
-      if (!res.ok) throw new Error(`API error ${res.status}`);
-      const json = await res.json();
+      const json = await getPrediction(fixtureId);
       setData(json);
     } catch (e: any) {
       setErr(e.message || "Something went wrong");
@@ -33,7 +32,11 @@ export default function App() {
           onChange={(e) => setFixtureId(e.target.value)}
           placeholder="ID meci"
         />
-        <button onClick={load} className="bg-black text-white rounded px-4 py-2">
+        <button
+          onClick={load}
+          className="bg-black text-white rounded px-4 py-2"
+          disabled={loading}
+        >
           {loading ? "Se încarcă..." : "Vezi predicțiile"}
         </button>
       </div>
@@ -48,11 +51,35 @@ export default function App() {
             {data.teams?.away ?? "—"}
           </div>
 
-          <div className="mt-2">
-            <div><b>1:</b> {data.oneXTwo?.home ?? "—"} &nbsp; <b>X:</b> {data.oneXTwo?.draw ?? "—"} &nbsp; <b>2:</b> {data.oneXTwo?.away ?? "—"}</div>
-            <div><b>Recomandat:</b> {data.oneXTwo?.recommended ?? "—"}</div>
-            <div><b>GG/NG:</b> {data.bothTeamsToScore ? `${data.bothTeamsToScore.label} (${data.bothTeamsToScore.confidence})` : "—"}</div>
-            <div><b>O/U 2.5:</b> {data.overUnder25 ? `${data.overUnder25.label} (${data.overUnder25.confidence})` : "—"}</div>
+          <div className="mt-2 space-y-1">
+            <div>
+              <b>1:</b> {data.oneXTwo?.home ?? "—"} &nbsp;{" "}
+              <b>X:</b> {data.oneXTwo?.draw ?? "—"} &nbsp;{" "}
+              <b>2:</b> {data.oneXTwo?.away ?? "—"}
+            </div>
+            <div>
+              <b>Recomandat:</b> {data.oneXTwo?.recommended ?? "—"}
+            </div>
+            <div>
+              <b>GG/NG:</b>{" "}
+              {data.bothTeamsToScore
+                ? `${data.bothTeamsToScore.label}${
+                    data.bothTeamsToScore.confidence
+                      ? ` (${data.bothTeamsToScore.confidence})`
+                      : ""
+                  }`
+                : "—"}
+            </div>
+            <div>
+              <b>O/U 2.5:</b>{" "}
+              {data.overUnder25
+                ? `${data.overUnder25.label}${
+                    data.overUnder25.confidence
+                      ? ` (${data.overUnder25.confidence})`
+                      : ""
+                  }`
+                : "—"}
+            </div>
           </div>
         </div>
       )}

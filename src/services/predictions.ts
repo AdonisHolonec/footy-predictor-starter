@@ -1,28 +1,39 @@
 // src/services/predictions.ts
-export type Prediction = {
-  fixtureId: number;
-  teams: { home: string | null; away: string | null };
-  oneXTwo: {
-    home: string | null;
-    draw: string | null;
-    away: string | null;
-    recommended: string | null;
-  };
-  bothTeamsToScore: { label: string; confidence: string } | null;
-  overUnder25: { label: string; confidence: string } | null;
-  correctScore: any | null;
-  halfTimeGoals: any | null;
-  cardsOver45: any | null;
-  cornersOver125: any | null;
-  raw?: any;
+
+export type OneXTwo = {
+  home: string | null;       // ex: "45%"
+  draw: string | null;       // ex: "30%"
+  away: string | null;       // ex: "25%"
+  recommended: string | null; // ex: "1 (45%)" sau "1X / X2"
 };
 
-const API_BASE =
-  (typeof window !== "undefined" ? "" : process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "") || "";
+export type LabelConf = { label: string; confidence?: string } | null;
 
-export async function getPrediction(fixtureId: number): Promise<Prediction> {
-  const url = `${API_BASE}/api/predict?fixtureId=${fixtureId}`;
-  const r = await fetch(url, { headers: { "Content-Type": "application/json" } });
-  if (!r.ok) throw new Error(`API error ${r.status}`);
-  return r.json();
+export type PredictResponse = {
+  fixture: number;
+  teams: { home: string | null; away: string | null };
+  oneXTwo: OneXTwo;
+  bothTeamsToScore: LabelConf; // GG / NGG (cu confidence dacă e disponibil)
+  overUnder25: LabelConf;      // Peste/Sub 2.5 (cu confidence dacă e disponibil)
+  // restul de câmpuri le poți accesa prin ?debug=1 în endpoint (vin în `raw`)
+};
+
+/**
+ * Cere predicțiile pentru o fixtură. Aruncă eroare dacă backend-ul
+ * răspunde cu status non-200.
+ *
+ * @param fixtureId ID-ul numeric al meciului (string ca să putem trimite direct din input).
+ */
+export async function getPrediction(fixtureId: string): Promise<PredictResponse> {
+  const url = `/api/predict?fixture=${encodeURIComponent(fixtureId)}`;
+  const res = await fetch(url);
+
+  if (!res.ok) {
+    // fie eroare internă, fie de la API-ul upstream
+    const txt = await res.text().catch(() => "");
+    throw new Error(`API error ${res.status}${txt ? `: ${txt}` : ""}`);
+  }
+
+  const data = (await res.json()) as PredictResponse;
+  return data;
 }
