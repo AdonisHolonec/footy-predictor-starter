@@ -1,5 +1,9 @@
 // /api/predict.js
+// Funcție serverless Vercel care proxy-uiește către API-FOOTBALL v3 "predictions"
+// Usage: GET /api/predict?fixtureId=123456[&debug=1]
+
 export default async function handler(req, res) {
+  // CORS simplu pt. dev; ajustează origin-ul dacă vrei mai strict
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -12,16 +16,23 @@ export default async function handler(req, res) {
 
     const { fixtureId } = req.query;
     if (!fixtureId || !/^\d+$/.test(String(fixtureId))) {
-      return res.status(400).json({ error: "Parametrul ?fixtureId este obligatoriu și trebuie să fie numeric." });
+      return res
+        .status(400)
+        .json({ error: "Parametrul ?fixtureId este obligatoriu și trebuie să fie numeric." });
     }
 
     const API_KEY = process.env.API_FOOTBALL_KEY;
     if (!API_KEY) {
-      return res.status(500).json({ error: "Lipsește variabila de mediu API_FOOTBALL_KEY pe Vercel." });
+      return res.status(500).json({
+        error:
+          "Lipsește variabila de mediu API_FOOTBALL_KEY pe Vercel. Adaug-o în Project Settings → Environment Variables.",
+      });
     }
 
+    // Dacă folosești RapidAPI, setează și API_FOOTBALL_HOST=api-football-v1.p.rapidapi.com
     const RAPIDAPI_HOST = process.env.API_FOOTBALL_HOST || "";
     const isRapid = !!RAPIDAPI_HOST;
+
     const url = isRapid
       ? `https://${RAPIDAPI_HOST}/v3/predictions?fixture=${fixtureId}`
       : `https://v3.football.api-sports.io/predictions?fixture=${fixtureId}`;
@@ -30,22 +41,41 @@ export default async function handler(req, res) {
       ? { "X-RapidAPI-Key": API_KEY, "X-RapidAPI-Host": RAPIDAPI_HOST }
       : { "x-apisports-key": API_KEY };
 
+    // Cache pe edge (30s)
     res.setHeader("Cache-Control", "s-maxage=30, stale-while-revalidate=120");
 
-    const r = await fetch(url, { headers });
-    const data = await r.json();
-    if (!r.ok) {
-      return res.status(r.status).json({ error: "Eroare de la API-FOOTBALL", status: r.status, details: data });
+    // ==== FETCH + DEBUG ====
+    const upstream = await fetch(url, { headers });
+    const status = upstream.status;
+    const text = await upstream.text(); // citim ca text ca să putem vedea și erorile plain
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = null;
     }
 
+    // dacă upstream nu e ok, întoarcem eroarea clar
+    if (!upstream.ok) {
+      return res.status(status).json({
+        error: "Eroare de la API-FOOTBALL",
+        status,
+        upstream: data ?? text,
+      });
+    }
+
+    // === Normalizare minimă pentru frontend ===
     const raw = Array.isArray(data?.response) ? data.response[0] : null;
+
     const homeTeam = raw?.teams?.home?.name ?? null;
     const awayTeam = raw?.teams?.away?.name ?? null;
-    const winHome = raw?.predictions?.percent?.home ?? null;
-    const winDraw = raw?.predictions?.percent?.draw ?? null;
-    const winAway = raw?.predictions?.percent?.away ?? null;
+
+    const winHome = raw?.predictions?.percent?.home ?? null; // string "45%"
+    const winDraw = raw?.predictions?.percent?.draw ?? null; // string "28%"
+    const winAway = raw?.predictions?.percent?.away ?? null; // string "27%"
+
     const advice = raw?.predictions?.advice ?? null;
-    const goalsAvg = raw?.predictions?.goals?.average ?? null;
+    const goalsAvg = raw?.predictions?.goals?.average ?? null; // { home: "1.6", away: "1.1" }
 
     const mapped = {
       fixtureId: Number(fixtureId),
@@ -54,7 +84,8 @@ export default async function handler(req, res) {
         home: winHome,
         draw: winDraw,
         away: winAway,
-        recommended: pick1X2(winHome, winDraw, winAway) || (advice ? adviceTo1X2(advice) : null),
+        recommended:
+          pick1X2(winHome, winDraw, winAway) || (advice ? adviceTo1X2(advice) : null),
       },
       bothTeamsToScore: inferGG(goalsAvg),
       overUnder25: inferOU25(goalsAvg),
@@ -65,6 +96,17 @@ export default async function handler(req, res) {
       raw,
     };
 
+    // Dacă ceri ?debug=1 sau dacă nu există raw, trimitem și payload-ul upstream
+    if (req.query.debug === "1" || !raw) {
+      return res.status(200).json({
+        ...mapped,
+        debug: {
+          upstreamStatus: status,
+          upstream: data ?? text,
+        },
+      });
+    }
+
     return res.status(200).json(mapped);
   } catch (err) {
     console.error("[/api/predict] Unexpected error:", err);
@@ -72,11 +114,14 @@ export default async function handler(req, res) {
   }
 }
 
+/** Helpers **/
+
 function pctToNum(p) {
   if (p == null) return null;
   const n = Number(String(p).replace("%", "").trim());
   return Number.isFinite(n) ? n : null;
 }
+
 function pick1X2(homePct, drawPct, awayPct) {
   const h = pctToNum(homePct);
   const d = pctToNum(drawPct);
@@ -90,6 +135,7 @@ function pick1X2(homePct, drawPct, awayPct) {
   arr.sort((x, y) => y.v - x.v);
   return `${arr[0].k} (${arr[0].v}%)`;
 }
+
 function adviceTo1X2(advice) {
   const s = String(advice).toLowerCase();
   if (s.includes("home") && s.includes("win")) return "1";
@@ -97,17 +143,21 @@ function adviceTo1X2(advice) {
   if (s.includes("draw")) return "X";
   return null;
 }
+
 function inferGG(goalsAvg) {
   const h = Number(goalsAvg?.home ?? NaN);
   const a = Number(goalsAvg?.away ?? NaN);
   if (!Number.isFinite(h) || !Number.isFinite(a)) return null;
+
   const ggLikely = h >= 0.9 && a >= 0.9;
   return ggLikely ? { label: "GG", confidence: "≈60%" } : { label: "NGG", confidence: "≈55%" };
 }
+
 function inferOU25(goalsAvg) {
   const h = Number(goalsAvg?.home ?? NaN);
   const a = Number(goalsAvg?.away ?? NaN);
   if (!Number.isFinite(h) || !Number.isFinite(a)) return null;
+
   const total = h + a;
   if (total >= 2.6) return { label: "Peste 2.5", confidence: "≈62%" };
   if (total <= 2.3) return { label: "Sub 2.5", confidence: "≈58%" };
