@@ -1,31 +1,28 @@
 // src/services/predictions.ts
-export type OneXTwo = {
-  home: string | null;   // ex "45%"
-  draw: string | null;
-  away: string | null;
-  recommended: string | null; // ex "1 (45%)"
-};
-
-export type LabelConf = { label: string; confidence: string } | null;
-
 export type Prediction = {
   fixtureId: number;
   teams: { home: string | null; away: string | null };
-  oneXTwo: OneXTwo;
-  bothTeamsToScore: LabelConf; // ex {label:"GG", confidence:"≈60%"} | null
-  overUnder25: LabelConf;      // ex {label:"Peste 2.5", confidence:"≈62%"} | null
+  oneXTwo: {
+    home: string | null;
+    draw: string | null;
+    away: string | null;
+    recommended: string | null;
+  };
+  bothTeamsToScore: { label: string; confidence: string } | null;
+  overUnder25: { label: string; confidence: string } | null;
+  correctScore: any | null;
+  halfTimeGoals: any | null;
+  cardsOver45: any | null;
+  cornersOver125: any | null;
   raw?: any;
 };
 
 const API_BASE =
-  import.meta.env.VITE_API_BASE?.replace(/\/+$/, "") ||
-  (typeof window !== "undefined" ? window.location.origin : "");
+  (typeof window !== "undefined" ? "" : process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "") || "";
 
 export async function getPrediction(fixtureId: number): Promise<Prediction> {
-  const r = await fetch(`${API_BASE}/api/predict?fixtureId=${fixtureId}`);
-  if (!r.ok) {
-    const err = await r.json().catch(() => ({}));
-    throw new Error(err?.error || `Eroare API (${r.status})`);
-  }
+  const url = `${API_BASE}/api/predict?fixtureId=${fixtureId}`;
+  const r = await fetch(url, { headers: { "Content-Type": "application/json" } });
+  if (!r.ok) throw new Error(`API error ${r.status}`);
   return r.json();
 }
