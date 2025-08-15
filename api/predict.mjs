@@ -1,174 +1,227 @@
-// api/predict.mjs
-// Vercel Serverless Function — derive 1X2, BTTS (GG/NG) & O/U 2.5
-// Caută atât primary.predictions cât și primary.raw.predictions (unele fixturi pun datele acolo)
+// /api/predict.js
+// Vercel Node API route
 
 const RAPID_HOST = "api-football-v1.p.rapidapi.com";
 
-/* ---------- helpers ---------- */
-const num = (x) => {
-  if (x === undefined || x === null) return NaN;
-  const v = typeof x === "string" ? x.replace("%", "") : x;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : NaN;
-};
-const pct = (x) => (x === null || x === undefined || Number.isNaN(x) ? null : `${Math.round(x)}%`);
+function asPctString(v) {
+  if (v == null) return null;
+  const s = String(v).trim();
+  // "~85%" / "85%" / "85 %"
+  const mPct = s.match(/(\d+(?:[.,]\d+)?)\s*%/);
+  if (mPct) return `${mPct[1].replace(",", ".")}%`;
 
-function pickPredictionsNode(primary) {
-  // 1) uneori e direct primary.predictions
-  if (primary?.predictions) return primary.predictions;
-  // 2) alteori e primary.raw.predictions
-  if (primary?.raw?.predictions) return primary.raw.predictions;
+  // "0.85" => "85%"
+  const n = parseFloat(s.replace(",", "."));
+  if (!Number.isNaN(n)) {
+    if (n <= 1) return `${(n * 100).toFixed(0)}%`;
+    return `${n.toFixed(0)}%`;
+  }
   return null;
 }
 
-function top2Label(a, b, overLabel, underLabel) {
-  if (!Number.isFinite(a) || !Number.isFinite(b) || a + b === 0) return null;
-  const label = a >= b ? overLabel : underLabel;
-  const conf = Math.round((Math.max(a, b) / (a + b)) * 100);
-  return { label, confidence: `~${conf}%` };
+function parseNumber(v) {
+  if (v == null) return null;
+  const s = String(v).replace(",", ".").replace("%", "");
+  const n = parseFloat(s);
+  return Number.isNaN(n) ? null : n;
 }
 
-// Heuristică BTTS din media goluri (goals.average.{home,away} sau goals.{home,away})
-function deriveBTTSFromGoalsAverage(goalsAvg) {
-  if (!goalsAvg) return null;
+function pickRecommended(percent = {}) {
+  // percent = { home: "45%", draw: "30%", away: "25%" }
+  const entries = [
+    ["1", parseNumber(percent.home)],
+    ["X", parseNumber(percent.draw)],
+    ["2", parseNumber(percent.away)],
+  ].filter(([, n]) => n != null);
 
-  // suportă fie { average: {home,away} } fie deja {home,away}
-  const g = "average" in goalsAvg ? goalsAvg.average : goalsAvg;
-  const h = num(g?.home);
-  const a = num(g?.away);
+  if (!entries.length) return null;
+  entries.sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0));
+  const [label, val] = entries[0];
+  return `${label} (${val?.toFixed(0)}%)`;
+}
 
-  if (!Number.isFinite(h) || !Number.isFinite(a)) return null;
+// ————— Correct Score extractor —————
+// Acceptă mai multe forme: array, obiect map, sau alternative
+function getCorrectScoreTop(pred) {
+  if (!pred) return [];
 
-  const sum = h + a;
-
-  if (h >= 1 && a >= 1) {
-    const conf = Math.min(85, Math.round((Math.min(h, a) / 1.2) * 100));
-    return { label: "GG", confidence: `~${conf}%` };
+  // 1) dacă e array:
+  // ex: [{score:"1-0", probability:"22%"}] sau {label:"1-0", confidence:"22%"}
+  if (Array.isArray(pred.correct_score)) {
+    const list = pred.correct_score
+      .map((x) => ({
+        label: x.score || x.label || x.result || null,
+        confidence:
+          x.probability ?? x.confidence ?? x.percent ?? x.chance ?? null,
+      }))
+      .filter((x) => x.label)
+      .sort((a, b) => (parseNumber(b.confidence) ?? 0) - (parseNumber(a.confidence) ?? 0));
+    return list.slice(0, 3);
   }
-  if (sum < 1.8) {
-    const conf = Math.min(85, Math.round(((1.8 - sum) / 1.8) * 100) + 50);
-    return { label: "NGG", confidence: `~${conf}%` };
+
+  // 2) dacă e obiect: {"1-0":"22%","0-0":"18%",...}
+  if (pred.correct_score && typeof pred.correct_score === "object") {
+    const list = Object.entries(pred.correct_score)
+      .map(([score, prob]) => ({
+        label: score,
+        confidence: prob,
+      }))
+      .sort((a, b) => (parseNumber(b.confidence) ?? 0) - (parseNumber(a.confidence) ?? 0));
+    return list.slice(0, 3);
   }
-  return { label: sum >= 2 ? "GG" : "NGG" };
+
+  // 3) alte câmpuri posibile:
+  //   pred.scores?.correct, pred.score?.correct etc.
+  const altMaps = [
+    pred.scores?.correct,
+    pred.score?.correct,
+    pred.correctScores,
+    pred.correctscores,
+  ].filter(Boolean);
+
+  for (const m of altMaps) {
+    if (Array.isArray(m)) {
+      const list = m
+        .map((x) => ({
+          label: x.score || x.label || x.result || null,
+          confidence:
+            x.probability ?? x.confidence ?? x.percent ?? x.chance ?? null,
+        }))
+        .filter((x) => x.label)
+        .sort((a, b) => (parseNumber(b.confidence) ?? 0) - (parseNumber(a.confidence) ?? 0));
+      if (list.length) return list.slice(0, 3);
+    } else if (m && typeof m === "object") {
+      const list = Object.entries(m)
+        .map(([score, prob]) => ({ label: score, confidence: prob }))
+        .sort((a, b) => (parseNumber(b.confidence) ?? 0) - (parseNumber(a.confidence) ?? 0));
+      if (list.length) return list.slice(0, 3);
+    }
+  }
+
+  // dacă nu avem, întoarcem gol (UI ascunde secțiunea)
+  return [];
 }
 
-// fallback O/U 2.5 din suma mediei de goluri
-function deriveOU25FromGoalsAverage(goalsAvg) {
-  if (!goalsAvg) return null;
-  const g = "average" in goalsAvg ? goalsAvg.average : goalsAvg;
-  const sum = num(g?.home) + num(g?.away);
-  if (!Number.isFinite(sum)) return null;
-
-  const label = sum >= 2.5 ? "Peste 2.5" : "Sub 2.5";
-  const conf = Math.min(80, Math.round((Math.abs(sum - 2.5) / 2.5) * 100) + 40);
-  return { label, confidence: `~${conf}%` };
-}
-
-/* ---------- handler ---------- */
 export default async function handler(req, res) {
   try {
-    const url = new URL(req.url, `http://${req.headers.host}`);
-    const fixture = url.searchParams.get("fixture");
-    const debug = url.searchParams.get("debug") === "1";
-
+    const { fixture, debug } = req.query;
     if (!fixture) {
       res.status(400).json({ error: "Missing ?fixture" });
       return;
     }
 
-    const key = process.env.API_FOOTBALL_KEY;
-    if (!key) {
-      res.status(500).json({ error: "Missing API_FOOTBALL_KEY env var" });
+    const apiKey = process.env.API_FOOTBALL_KEY;
+    if (!apiKey) {
+      res.status(500).json({ error: "Missing API_FOOTBALL_KEY" });
       return;
     }
 
-    const upstreamUrl = `https://${RAPID_HOST}/v3/predictions?fixture=${encodeURIComponent(fixture)}`;
-    const upstreamResp = await fetch(upstreamUrl, {
+    const url = `https://${RAPID_HOST}/v3/predictions?fixture=${encodeURIComponent(
+      fixture
+    )}`;
+
+    const r = await fetch(url, {
       headers: {
-        "X-RapidAPI-Key": key,
+        "X-RapidAPI-Key": apiKey,
         "X-RapidAPI-Host": RAPID_HOST,
       },
     });
 
-    if (!upstreamResp.ok) {
-      const txt = await upstreamResp.text().catch(() => "");
-      res.status(upstreamResp.status).send(txt || "Upstream error");
-      return;
-    }
+    const upstream = await r.json();
 
-    const upstream = await upstreamResp.json();
-    const primary = upstream?.response?.[0] ?? {};
-
-    // --- teams
+    // Navigăm structura API-ului (response[0])
+    const node = upstream?.response?.[0] ?? upstream?.response ?? null;
     const teams = {
-      home: primary?.teams?.home?.name ?? primary?.teams?.home ?? null,
-      away: primary?.teams?.away?.name ?? primary?.teams?.away ?? null,
+      home:
+        node?.teams?.home?.name ??
+        node?.teams?.home ??
+        node?.fixture?.teams?.home?.name ??
+        null,
+      away:
+        node?.teams?.away?.name ??
+        node?.teams?.away ??
+        node?.fixture?.teams?.away?.name ??
+        null,
     };
 
-    // ----- node de predictions (robust: predictions OR raw.predictions)
-    const P = pickPredictionsNode(primary);
+    // predicțiile brute
+    const pred =
+      node?.predictions ??
+      node?.prediction ??
+      node?.preds ??
+      node?.data ??
+      {};
 
-    // ----- 1X2
-    const percent = P?.percent || null;
-    const oneXTwo = {
-      home: percent ? pct(num(percent.home)) : null,
-      draw: percent ? pct(num(percent.draw)) : null,
-      away: percent ? pct(num(percent.away)) : null,
-      recommended: null,
-    };
-    if (percent) {
-      const h = num(percent.home);
-      const x = num(percent.draw);
-      const a = num(percent.away);
-      const arr = [
-        { k: "1", v: h },
-        { k: "X", v: x },
-        { k: "2", v: a },
-      ].filter((e) => Number.isFinite(e.v));
-      if (arr.length) {
-        arr.sort((A, B) => B.v - A.v);
-        oneXTwo.recommended = `${arr[0].k} (${Math.round(arr[0].v)}%)`;
+    // 1X2: încercăm "percent.home/draw/away"
+    const percent =
+      pred?.percent ??
+      pred?.probabilities ??
+      pred?.oneXtwo ??
+      {};
+
+    // GG/NG și O/U 2.5 (păstrăm semantica existentă: label + confidence)
+    // Aici lăsăm logică minimalistă – dacă ai o mapare mai bună deja în proiect,
+    // o poți păstra; secțiunea asta nu rupe UI-ul când lipsesc câmpurile.
+    const bothTeamsToScore =
+      pred?.both_teams_to_score ||
+      pred?.btts ||
+      null;
+
+    const overUnder25 =
+      pred?.over_under_25 ||
+      pred?.overUnder25 ||
+      pred?.overunder?.["2.5"] ||
+      null;
+
+    // Normalizăm formatele unde e cazul (label + confidence)
+    function asLabelConf(x) {
+      if (!x) return null;
+      if (typeof x === "string") return { label: x, confidence: null };
+      if (typeof x === "object") {
+        return {
+          label: x.label ?? x.pick ?? x.value ?? null,
+          confidence:
+            asPctString(x.confidence ?? x.probability ?? x.percent ?? x.chance ?? null),
+        };
       }
+      return null;
     }
 
-    // ----- O/U 2.5 (direct din predictions.under_over["2.5"] dacă există)
-    let overUnder25 = null;
-    const uo = P?.under_over?.["2.5"];
-    if (uo) {
-      const over = num(uo.over);
-      const under = num(uo.under);
-      const ou = top2Label(over, under, "Peste 2.5", "Sub 2.5");
-      if (ou) overUnder25 = ou;
-    }
-
-    // ----- GG/NG: încercăm să derivăm din predicții.goals
-    // (poate fi P.goals.average.{home,away} sau P.goals.{home,away})
-    let bothTeamsToScore = null;
-    const goalsNode = P?.goals ?? null;
-    bothTeamsToScore = deriveBTTSFromGoalsAverage(goalsNode);
-
-    // fallback O/U 2.5 din media golurilor dacă nu avem uo["2.5"]
-    if (!overUnder25) {
-      overUnder25 = deriveOU25FromGoalsAverage(goalsNode);
-    }
-
-    const out = {
+    const payload = {
       fixture: Number(fixture),
       teams,
-      oneXTwo,
-      bothTeamsToScore,
-      overUnder25,
-      correctScore: null,
-      halfTimeGoals: null,
-      cardsOver45: null,
-      cornersOver125: null,
+      oneXTwo: {
+        home: asPctString(percent.home) ?? null,
+        draw: asPctString(percent.draw) ?? null,
+        away: asPctString(percent.away) ?? null,
+        recommended: pickRecommended(percent),
+      },
+      bothTeamsToScore: asLabelConf(bothTeamsToScore),
+      overUnder25: asLabelConf(overUnder25),
     };
 
-    if (debug) out.debug = { usedPredictionsNode: !!P, sample: P ?? null };
+    // —— Correct Score (top 3) ——
+    const topCS = getCorrectScoreTop(pred);
+    if (topCS.length) {
+      payload.correctScore = topCS.map((x) => ({
+        label: x.label,
+        confidence: asPctString(x.confidence),
+      }));
+    }
 
-    res.status(200).json(out);
+    // opțional: debug upstream
+    if (debug) {
+      payload.debug = {
+        upstreamStatus: r.status,
+        upstream,
+      };
+    }
+
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.status(200).send(JSON.stringify(payload));
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Internal error", detail: String(err?.message || err) });
+    res
+      .status(500)
+      .json({ error: "Server error in /api/predict", details: String(err) });
   }
 }
