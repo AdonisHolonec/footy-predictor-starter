@@ -1,142 +1,174 @@
-// /api/predict.js
+// api/predict.mjs
+// Vercel Serverless Function — derive 1X2, BTTS (GG/NG) & O/U 2.5
+// Caută atât primary.predictions cât și primary.raw.predictions (unele fixturi pun datele acolo)
+
+const RAPID_HOST = "api-football-v1.p.rapidapi.com";
+
+/* ---------- helpers ---------- */
+const num = (x) => {
+  if (x === undefined || x === null) return NaN;
+  const v = typeof x === "string" ? x.replace("%", "") : x;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : NaN;
+};
+const pct = (x) => (x === null || x === undefined || Number.isNaN(x) ? null : `${Math.round(x)}%`);
+
+function pickPredictionsNode(primary) {
+  // 1) uneori e direct primary.predictions
+  if (primary?.predictions) return primary.predictions;
+  // 2) alteori e primary.raw.predictions
+  if (primary?.raw?.predictions) return primary.raw.predictions;
+  return null;
+}
+
+function top2Label(a, b, overLabel, underLabel) {
+  if (!Number.isFinite(a) || !Number.isFinite(b) || a + b === 0) return null;
+  const label = a >= b ? overLabel : underLabel;
+  const conf = Math.round((Math.max(a, b) / (a + b)) * 100);
+  return { label, confidence: `~${conf}%` };
+}
+
+// Heuristică BTTS din media goluri (goals.average.{home,away} sau goals.{home,away})
+function deriveBTTSFromGoalsAverage(goalsAvg) {
+  if (!goalsAvg) return null;
+
+  // suportă fie { average: {home,away} } fie deja {home,away}
+  const g = "average" in goalsAvg ? goalsAvg.average : goalsAvg;
+  const h = num(g?.home);
+  const a = num(g?.away);
+
+  if (!Number.isFinite(h) || !Number.isFinite(a)) return null;
+
+  const sum = h + a;
+
+  if (h >= 1 && a >= 1) {
+    const conf = Math.min(85, Math.round((Math.min(h, a) / 1.2) * 100));
+    return { label: "GG", confidence: `~${conf}%` };
+  }
+  if (sum < 1.8) {
+    const conf = Math.min(85, Math.round(((1.8 - sum) / 1.8) * 100) + 50);
+    return { label: "NGG", confidence: `~${conf}%` };
+  }
+  return { label: sum >= 2 ? "GG" : "NGG" };
+}
+
+// fallback O/U 2.5 din suma mediei de goluri
+function deriveOU25FromGoalsAverage(goalsAvg) {
+  if (!goalsAvg) return null;
+  const g = "average" in goalsAvg ? goalsAvg.average : goalsAvg;
+  const sum = num(g?.home) + num(g?.away);
+  if (!Number.isFinite(sum)) return null;
+
+  const label = sum >= 2.5 ? "Peste 2.5" : "Sub 2.5";
+  const conf = Math.min(80, Math.round((Math.abs(sum - 2.5) / 2.5) * 100) + 40);
+  return { label, confidence: `~${conf}%` };
+}
+
+/* ---------- handler ---------- */
 export default async function handler(req, res) {
-  // CORS minimal (opțional)
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  if (req.method === "OPTIONS") return res.status(204).end();
-
   try {
-    if (req.method !== "GET") {
-      return res.status(405).json({ error: "Method not allowed" });
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const fixture = url.searchParams.get("fixture");
+    const debug = url.searchParams.get("debug") === "1";
+
+    if (!fixture) {
+      res.status(400).json({ error: "Missing ?fixture" });
+      return;
     }
 
-    // Acceptă ?fixture sau ?fixtureId
-    const fixture = req.query?.fixture || req.query?.fixtureId;
-    if (!fixture || !/^\d+$/.test(String(fixture))) {
-      return res
-        .status(400)
-        .json({ error: "Parametrul ?fixture (sau ?fixtureId) este obligatoriu și numeric." });
+    const key = process.env.API_FOOTBALL_KEY;
+    if (!key) {
+      res.status(500).json({ error: "Missing API_FOOTBALL_KEY env var" });
+      return;
     }
 
-    const API_KEY = process.env.API_FOOTBALL_KEY;
-    if (!API_KEY) {
-      return res
-        .status(500)
-        .json({ error: "Lipsește API_FOOTBALL_KEY în Environment Variables (Vercel)." });
+    const upstreamUrl = `https://${RAPID_HOST}/v3/predictions?fixture=${encodeURIComponent(fixture)}`;
+    const upstreamResp = await fetch(upstreamUrl, {
+      headers: {
+        "X-RapidAPI-Key": key,
+        "X-RapidAPI-Host": RAPID_HOST,
+      },
+    });
+
+    if (!upstreamResp.ok) {
+      const txt = await upstreamResp.text().catch(() => "");
+      res.status(upstreamResp.status).send(txt || "Upstream error");
+      return;
     }
 
-    const url = `https://api-football-v1.p.rapidapi.com/v3/predictions?fixture=${fixture}`;
-    const headers = {
-      "X-RapidAPI-Key": API_KEY,
-      "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com",
+    const upstream = await upstreamResp.json();
+    const primary = upstream?.response?.[0] ?? {};
+
+    // --- teams
+    const teams = {
+      home: primary?.teams?.home?.name ?? primary?.teams?.home ?? null,
+      away: primary?.teams?.away?.name ?? primary?.teams?.away ?? null,
     };
 
-    // cache edge
-    res.setHeader("Cache-Control", "s-maxage=30, stale-while-revalidate=120");
+    // ----- node de predictions (robust: predictions OR raw.predictions)
+    const P = pickPredictionsNode(primary);
 
-    const upstream = await fetch(url, { headers });
-    const status = upstream.status;
-    const text = await upstream.text();
-
-    let data;
-    try { data = JSON.parse(text); } catch { data = null; }
-
-    if (!upstream.ok) {
-      return res
-        .status(status)
-        .json({ error: "Eroare de la API-FOOTBALL", status, upstream: data ?? text });
+    // ----- 1X2
+    const percent = P?.percent || null;
+    const oneXTwo = {
+      home: percent ? pct(num(percent.home)) : null,
+      draw: percent ? pct(num(percent.draw)) : null,
+      away: percent ? pct(num(percent.away)) : null,
+      recommended: null,
+    };
+    if (percent) {
+      const h = num(percent.home);
+      const x = num(percent.draw);
+      const a = num(percent.away);
+      const arr = [
+        { k: "1", v: h },
+        { k: "X", v: x },
+        { k: "2", v: a },
+      ].filter((e) => Number.isFinite(e.v));
+      if (arr.length) {
+        arr.sort((A, B) => B.v - A.v);
+        oneXTwo.recommended = `${arr[0].k} (${Math.round(arr[0].v)}%)`;
+      }
     }
 
-    const primary = Array.isArray(data?.response) ? data.response[0] : null;
+    // ----- O/U 2.5 (direct din predictions.under_over["2.5"] dacă există)
+    let overUnder25 = null;
+    const uo = P?.under_over?.["2.5"];
+    if (uo) {
+      const over = num(uo.over);
+      const under = num(uo.under);
+      const ou = top2Label(over, under, "Peste 2.5", "Sub 2.5");
+      if (ou) overUnder25 = ou;
+    }
 
-    // extrageri
-    const homeTeam = primary?.teams?.home?.name ?? null;
-    const awayTeam = primary?.teams?.away?.name ?? null;
+    // ----- GG/NG: încercăm să derivăm din predicții.goals
+    // (poate fi P.goals.average.{home,away} sau P.goals.{home,away})
+    let bothTeamsToScore = null;
+    const goalsNode = P?.goals ?? null;
+    bothTeamsToScore = deriveBTTSFromGoalsAverage(goalsNode);
 
-    const pHome  = primary?.predictions?.percent?.home ?? null; // ex: "45%"
-    const pDraw  = primary?.predictions?.percent?.draw ?? null; // ex: "30%"
-    const pAway  = primary?.predictions?.percent?.away ?? null; // ex: "25%"
-    const advice = primary?.predictions?.advice ?? null;         // ex: "Combo Double chance ..."
-    const goalsAvg = primary?.predictions?.goals?.average ?? null; // uneori { home, away }
+    // fallback O/U 2.5 din media golurilor dacă nu avem uo["2.5"]
+    if (!overUnder25) {
+      overUnder25 = deriveOU25FromGoalsAverage(goalsNode);
+    }
 
-    const mapped = {
+    const out = {
       fixture: Number(fixture),
-      teams: { home: homeTeam, away: awayTeam },
-
-      oneXTwo: {
-        home: pHome,
-        draw: pDraw,
-        away: pAway,
-        // alegem cel mai mare procent; dacă lipsesc, încercăm să înțelegem din 'advice'
-        recommended: pick1X2(pHome, pDraw, pAway) || adviceTo1X2(advice),
-      },
-
-      // dacă API nu oferă explicit BTTS/O/U, derivăm din mediile de goluri
-      bothTeamsToScore: inferGG(goalsAvg),          // { label: "GG"/"NGG", confidence: "≈60%" } | null
-      overUnder25:     inferOU25(goalsAvg),         // { label: "Peste/Sub 2.5", confidence } | null
-
-      // placeholder pentru alte piețe (le poți completa ulterior)
+      teams,
+      oneXTwo,
+      bothTeamsToScore,
+      overUnder25,
       correctScore: null,
       halfTimeGoals: null,
       cardsOver45: null,
       cornersOver125: null,
-
-      // îți las și brutul pentru debug
-      raw: primary ?? null,
     };
 
-    if (req.query?.debug === "1") {
-      return res.status(200).json({
-        ...mapped,
-        debug: { upstreamStatus: status, upstream: data ?? text },
-      });
-    }
+    if (debug) out.debug = { usedPredictionsNode: !!P, sample: P ?? null };
 
-    return res.status(200).json(mapped);
+    res.status(200).json(out);
   } catch (err) {
-    console.error("[/api/predict] crash:", err);
-    return res.status(500).json({ error: "Internal error", details: String(err?.message || err) });
+    console.error(err);
+    res.status(500).json({ error: "Internal error", detail: String(err?.message || err) });
   }
-}
-
-/* ===== Helpers ===== */
-function pctToNum(p) {
-  if (p == null) return null;
-  const n = Number(String(p).replace("%", "").trim());
-  return Number.isFinite(n) ? n : null;
-}
-function pick1X2(homePct, drawPct, awayPct) {
-  const h = pctToNum(homePct), d = pctToNum(drawPct), a = pctToNum(awayPct);
-  const arr = [{ k: "1", v: h }, { k: "X", v: d }, { k: "2", v: a }].filter(x => x.v != null);
-  if (!arr.length) return null;
-  arr.sort((x, y) => y.v - x.v);
-  return `${arr[0].k} (${arr[0].v}%)`;
-}
-function adviceTo1X2(advice) {
-  if (!advice) return null;
-  const s = String(advice).toLowerCase();
-  if (s.includes("home") && s.includes("win")) return "1";
-  if (s.includes("away") && s.includes("win")) return "2";
-  if (s.includes("draw")) return "X";
-  if (s.includes("double chance")) return "1X / X2";
-  return null;
-}
-function inferGG(goalsAvg) {
-  const h = Number(goalsAvg?.home ?? NaN);
-  const a = Number(goalsAvg?.away ?? NaN);
-  if (!Number.isFinite(h) || !Number.isFinite(a)) return null;
-  const tot = h + a;
-  if (h >= 1.0 && a >= 1.0) return { label: "GG", confidence: "≈60%" };
-  if (tot >= 2.4 && h >= 0.9 && a >= 0.9) return { label: "GG", confidence: "≈55%" };
-  return { label: "NGG", confidence: "≈55%" };
-}
-function inferOU25(goalsAvg) {
-  const h = Number(goalsAvg?.home ?? NaN);
-  const a = Number(goalsAvg?.away ?? NaN);
-  if (!Number.isFinite(h) || !Number.isFinite(a)) return null;
-  const tot = h + a;
-  if (tot >= 2.6) return { label: "Peste 2.5", confidence: "≈62%" };
-  if (tot <= 2.3) return { label: "Sub 2.5", confidence: "≈58%" };
-  return { label: tot >= 2.5 ? "Peste 2.5" : "Sub 2.5", confidence: "≈52%" };
 }
