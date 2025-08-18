@@ -1,41 +1,70 @@
+// api/footy-predictor.ts
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-const ALLOWED = (process.env.FOOTY_ALLOWED_PATHS || '')
+const BASE   = process.env.RAPIDAPI_BASE_URL || '';
+const HOST   = process.env.RAPIDAPI_HOST || '';
+const KEY    = process.env.RAPIDAPI_KEY || '';
+const ALLOW  = (process.env.FOOTY_ALLOWED_PATHS || '')
   .split(',')
   .map(s => s.trim())
   .filter(Boolean);
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
-    const pathQ = req.query.path;
-    const path = Array.isArray(pathQ) ? pathQ[0] : String(pathQ || '');
-    if (!path || !ALLOWED.includes(path)) {
-      return res.status(400).json({ error: 'invalid or not-allowed path', path, allowed: ALLOWED });
+    // Ex: /api/footy-predictor?path=/fixtures&date=2025-08-17&league=283&season=2025
+    const path = String(req.query.path ?? '');
+
+    if (!path.startsWith('/')) {
+      res.status(400).json({ error: 'bad_request', message: 'query "path" must start with /' });
+      return;
+    }
+    if (ALLOW.length && !ALLOW.includes(path)) {
+      res.status(403).json({ error: 'forbidden_path', path, allowed: ALLOW });
+      return;
     }
 
-    const base = process.env.RAPIDAPI_BASE_URL!;
-    const url = new URL(base + path);
+    if (!BASE || !HOST || !KEY) {
+      res.status(500).json({
+        error: 'missing_env',
+        missing: {
+          RAPIDAPI_BASE_URL: !!BASE,
+          RAPIDAPI_HOST: !!HOST,
+          RAPIDAPI_KEY: !!KEY,
+        },
+      });
+      return;
+    }
 
-    // forward all query params except 'path'
+    const url = new URL(BASE + path);
+
+    // Propagăm toți parametrii (mai puțin "path")
     Object.entries(req.query).forEach(([k, v]) => {
       if (k === 'path') return;
-      if (path === '/fixtures' && k === 'limit') return; // API v3 nu suportă "limit"
-      url.searchParams.set(k, Array.isArray(v) ? v[0] : String(v));
+      // API v3 nu acceptă "limit" pe /fixtures
+      if (path === '/fixtures' && k === 'limit') return;
+      url.searchParams.set(k, String(Array.isArray(v) ? v[0] : v));
     });
 
     const upstream = await fetch(url.toString(), {
       headers: {
-        'x-rapidapi-key': process.env.RAPIDAPI_KEY || '',
-        'x-rapidapi-host': process.env.RAPIDAPI_HOST || ''
-      }
+        'x-rapidapi-key': KEY,
+        'x-rapidapi-host': HOST,
+        'accept': 'application/json',
+      },
+      // doar GET pentru acest proxy
+      method: 'GET',
     });
 
-    const body = await upstream.text();
-    res
-      .status(upstream.status)
-      .setHeader('content-type', upstream.headers.get('content-type') || 'application/json')
-      .send(body);
-  } catch (e: any) {
-    res.status(500).json({ error: e?.message || 'proxy failed' });
+    const text = await upstream.text();
+
+    // Răspunde cu JSON dacă e JSON; altfel returnează textul brut (ca să vezi eroarea reală)
+    try {
+      const json = JSON.parse(text);
+      res.status(upstream.status).json(json);
+    } catch {
+      res.status(upstream.status).send(text);
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: 'proxy_error', message: err?.message ?? String(err) });
   }
 }
