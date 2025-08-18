@@ -1,4 +1,8 @@
-/* src/index.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* restul stilurilor tale (variabile, .btn-*, etc.) */
 
 /* Paletă mică pt. “Inter Blue” folosită în headerul ADVICE */
 :root{
