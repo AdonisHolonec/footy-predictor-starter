@@ -1,10 +1,5 @@
 /* src/index.css */
 
-/* Dacă folosești Tailwind, lasă aceste 3 linii la început */
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
 /* Paletă mică pt. “Inter Blue” folosită în headerul ADVICE */
 :root{
   --inter-blue-50:  #eef5ff;
