@@ -1,7 +1,7 @@
 // api/footy-predictor.ts
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-export const runtime = 'nodejs' as const; // NU edge
+
 
 const BASE = process.env.UPSTREAM_BASE_URL ?? 'https://example.com'; // <-- setează în Vercel
 
