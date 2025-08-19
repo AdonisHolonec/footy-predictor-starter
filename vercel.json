@@ -1,7 +1,5 @@
 {
   "version": 2,
   "framework": "vite",
-  "buildCommand": "vite build",
-  "outputDirectory": "dist",
-  "devCommand": "vite"
+  "outputDirectory": "dist"
 }
