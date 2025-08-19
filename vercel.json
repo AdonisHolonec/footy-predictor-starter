@@ -5,6 +5,9 @@
   "outputDirectory": "dist",
   "devCommand": "vite",
   "functions": {
-    "api/**.ts": { "runtime": "nodejs18.x", "maxDuration": 10 }
+    "api/**": {
+      "runtime": "nodejs20.x",
+      "maxDuration": 10
     }
+  }
 }
