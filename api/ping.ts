@@ -1,6 +1,7 @@
-export default async function handler(_req: Request) {
-  return new Response(JSON.stringify({ ok: true, ts: Date.now() }), {
-    status: 200,
-    headers: { "content-type": "application/json" }
-  });
+// api/ping.ts
+export const runtime = 'nodejs' as const;
+
+export default function handler(_req: any, res: any) {
+  res.setHeader('content-type', 'application/json; charset=utf-8');
+  res.status(200).send(JSON.stringify({ ok: true, now: new Date().toISOString() }));
 }
