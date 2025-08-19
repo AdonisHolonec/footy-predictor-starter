@@ -1,2 +1,6 @@
+@"
+node_modules/
+dist/
+.env
 .vercel
-.env*.local
+"@ | Set-Content -Encoding utf8 .gitignore

@@ -1,3 +1,4 @@
+@'
 {
   "version": 2,
   "framework": "vite",
@@ -5,9 +6,7 @@
   "outputDirectory": "dist",
   "devCommand": "vite",
   "functions": {
-    "api/**": {
-      "runtime": "nodejs20.x",
-      "maxDuration": 10
-    }
+    "api/**": { "runtime": "nodejs20.x", "maxDuration": 10 }
   }
 }
+'@ | Set-Content -Encoding utf8 vercel.json
