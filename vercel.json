@@ -1,13 +1,11 @@
-Set-Content -Path vercel.json -Encoding utf8 -NoNewline -Value @'
-{
+﻿{
   "version": 2,
   "functions": {
     "api/**/*.{js,ts}": {
       "runtime": "nodejs20.x"
     }
   },
-  "buildCommand": "vite build",
+  "buildCommand": "node ./node_modules/vite/bin/vite.js build",
   "outputDirectory": "dist",
-  "devCommand": "vite"
+  "devCommand": "node ./node_modules/vite/bin/vite.js"
 }
-'@
