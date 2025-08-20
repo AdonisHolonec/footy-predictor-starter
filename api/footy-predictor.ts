@@ -1,49 +1,70 @@
-// api/footy-predictor.ts
+﻿// api/footy-predictor.ts
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
+// forÈ›eazÄƒ Node 20 pe Vercel
+export const config = { runtime: 'nodejs20.x' };
 
-
-const BASE = process.env.UPSTREAM_BASE_URL ?? 'https://example.com'; // <-- setează în Vercel
+const allowed = (process.env.FOOTY_ALLOWED_PATHS || '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
-    const path = String(req.query.path ?? '');
-    if (!path || !path.startsWith('/')) {
-      return res.status(400).json({ error: 'Query `path` is required and must start with "/"' });
+    const path = String(req.query.path || '');
+    if (!path.startsWith('/')) {
+      res.status(400).json({ error: "Query `path` is required and must start with '/'" });
+      return;
+    }
+    if (allowed.length && !allowed.includes(path)) {
+      res.status(403).json({ error: 'path_not_allowed', path, allowed });
+      return;
     }
 
-    const url = new URL(path, BASE).toString();
+    const qs = new URLSearchParams(req.query as any);
+    qs.delete('path');
+
+    const base = process.env.UPSTREAM_BASE_URL || 'https://api-football-v1.p.rapidapi.com';
+    const url = `${base}${path}${qs.toString() ? `?${qs.toString()}` : ''}`;
+
+    const rapidKey =
+      process.env.X_RAPIDAPI_KEY || process.env.RAPIDAPI_KEY || '';
+    const rapidHost =
+      process.env.X_RAPIDAPI_HOST || process.env.RAPIDAPI_HOST || '';
+
+    if (!rapidKey) {
+      res.status(500).json({ error: 'missing_rapidapi_key' });
+      return;
+    }
+    if (!rapidHost) {
+      res.status(500).json({ error: 'missing_rapidapi_host' });
+      return;
+    }
 
     const controller = new AbortController();
-    const timeoutMs = Number(process.env.UPSTREAM_TIMEOUT_MS ?? 8000);
-    const t = setTimeout(() => controller.abort(), timeoutMs);
+    const timeout = Number(process.env.UPSTREAM_TIMEOUT_MS || 5000);
+    const tm = setTimeout(() => controller.abort(new Error('timeout')), timeout);
 
-    const upstreamRes = await fetch(url, {
+    const r = await fetch(url, {
       headers: {
-        Accept: 'application/json',
-        ...(process.env.UPSTREAM_API_KEY ? { 'x-api-key': process.env.UPSTREAM_API_KEY } : {}),
+        'x-rapidapi-key': rapidKey,
+        'x-rapidapi-host': rapidHost,
+        'accept': 'application/json',
       },
-      cache: 'no-store',
       signal: controller.signal,
     });
+    clearTimeout(tm);
 
-    clearTimeout(t);
+    const ct = r.headers.get('content-type') || '';
+    const body = ct.includes('application/json') ? await r.json()
+      : { preview: await r.text() };
 
-    const ct = upstreamRes.headers.get('content-type') || '';
-    if (!ct.includes('application/json')) {
-      // Upstream nu a returnat JSON -> returnăm tot JSON cu preview util
-      const text = await upstreamRes.text();
-      return res.status(502).json({
-        error: 'upstream_not_json',
-        status: upstreamRes.status,
-        preview: text.slice(0, 180),
-      });
-    }
-
-    const body = await upstreamRes.json();
-    return res.status(upstreamRes.ok ? 200 : upstreamRes.status).json(body);
+    res.status(r.status).json(body);
   } catch (err: any) {
-    console.error('[api/footy-predictor]', err);
-    return res.status(500).json({ error: String(err?.message || err || 'internal_error') });
+    console.error('footy-predictor error', {
+      message: err?.message,
+      stack: err?.stack,
+    });
+    res.status(500).json({ error: 'function_crashed', message: err?.message });
   }
 }

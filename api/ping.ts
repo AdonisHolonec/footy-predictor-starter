@@ -1,4 +1,4 @@
-// api/ping.ts
+﻿// api/ping.ts
 
 
 export default function handler(_req: any, res: any) {
