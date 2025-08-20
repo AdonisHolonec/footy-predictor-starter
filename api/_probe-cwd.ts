@@ -1,4 +1,4 @@
-// src/api/_probe-cwd.ts
+﻿// src/api/_probe-cwd.ts
 import fs from 'fs';
 import path from 'path';
 
@@ -20,10 +20,10 @@ export default async function handler(req: any, res: any) {
     JSON.stringify(
       {
         cwd,
-        envFilesHere,            // vezi ce .env* există exact în folderul proiectului
+        envFilesHere,            // vezi ce .env* existÄƒ exact Ã®n folderul proiectului
         exists_env_local: existsLocal,
         exists_env: existsBase,
-        hint: "Fișierul corect trebuie să fie exact '.env.local' sau '.env' în ACELASI folder cu package.json (fără .txt la final).",
+        hint: "FiÈ™ierul corect trebuie sÄƒ fie exact '.env.local' sau '.env' Ã®n ACELASI folder cu package.json (fÄƒrÄƒ .txt la final).",
       },
       null,
       2

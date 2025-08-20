@@ -1,4 +1,4 @@
-// src/api/_probe-env.ts
+﻿// src/api/_probe-env.ts
 export default async function handler(req: any, res: any) {
   const k1 = process.env.RAPIDAPI_KEY;
   const k2 = process.env.API_FOOTBALL_KEY;
@@ -19,7 +19,7 @@ export default async function handler(req: any, res: any) {
           X_RAPIDAPI_KEY: Boolean(k3),
         },
         preview: mask(chosen),  // nu expunem cheia, doar capetele
-        note: "Dacă toate 'saw.*' sunt false, înseamnă că dotenv nu le-a încărcat (fișierul nu e văzut sau serverul pornește din alt folder).",
+        note: "DacÄƒ toate 'saw.*' sunt false, Ã®nseamnÄƒ cÄƒ dotenv nu le-a Ã®ncÄƒrcat (fiÈ™ierul nu e vÄƒzut sau serverul porneÈ™te din alt folder).",
       },
       null,
       2

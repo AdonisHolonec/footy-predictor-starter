@@ -1,8 +1,8 @@
-// ============================================
+﻿// ============================================
 // Vercel Serverless Function (Node 18+)
 // Input:  { homeTeam, awayTeam, features?, maxGoals?, topK? }
 // Output: { homeTeam, awayTeam, top: [{score, prob}], version }
-// NOTE: Înlocuiește mock-ul cu apelul la modelul tău real când e gata.
+// NOTE: ÃŽnlocuieÈ™te mock-ul cu apelul la modelul tÄƒu real cÃ¢nd e gata.
 // ============================================
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
@@ -15,7 +15,7 @@ type PredictRequest = {
   features?: {
     homeAvgGoals?: number; // ex: medie goluri ultimele 10 meciuri
     awayAvgGoals?: number;
-    homeDefStrength?: number; // 0..1 (1 = apărare foarte puternică)
+    homeDefStrength?: number; // 0..1 (1 = apÄƒrare foarte puternicÄƒ)
     awayDefStrength?: number; // 0..1
   };
   maxGoals?: number; // default 5 (range sigur 3..8)
@@ -25,12 +25,12 @@ type PredictRequest = {
 type PredictResponse = {
   homeTeam: string;
   awayTeam: string;
-  top: Array<{ score: Scoreline; prob: number }>; // prob în [0,1]
+  top: Array<{ score: Scoreline; prob: number }>; // prob Ã®n [0,1]
   all?: Array<{ score: Scoreline; prob: number }>;
   version: string;
 };
 
-// --- Util: parse number în siguranță
+// --- Util: parse number Ã®n siguranÈ›Äƒ
 const num = (v: unknown, d: number) =>
   typeof v === "number" && Number.isFinite(v) ? v : d;
 
@@ -59,10 +59,10 @@ function mockModelPredict({
     const ph = pois(h, homeLambda);
     for (let a = 0; a <= maxGoals; a++) {
       const pa = pois(a, awayLambda);
-      matrix[h][a] = ph * pa; // independență H/A
+      matrix[h][a] = ph * pa; // independenÈ›Äƒ H/A
     }
   }
-  // Normalizează din cauza trunchierii la maxGoals
+  // NormalizeazÄƒ din cauza trunchierii la maxGoals
   const sum = matrix.flat().reduce((s, x) => s + x, 0) || 1;
   for (let h = 0; h <= maxGoals; h++)
     for (let a = 0; a <= maxGoals; a++) matrix[h][a] /= sum;
@@ -93,8 +93,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const f = body.features || {};
     const baseHome = num(f.homeAvgGoals, 1.6);
     const baseAway = num(f.awayAvgGoals, 1.2);
-    const defH = 1 - Math.min(Math.max(num(f.awayDefStrength, 0.5), 0), 1); // cât de „sită” e apărarea oaspeților
-    const defA = 1 - Math.min(Math.max(num(f.homeDefStrength, 0.5), 0), 1); // cât de „sită” e apărarea gazdelor
+    const defH = 1 - Math.min(Math.max(num(f.awayDefStrength, 0.5), 0), 1); // cÃ¢t de â€žsitÄƒâ€ e apÄƒrarea oaspeÈ›ilor
+    const defA = 1 - Math.min(Math.max(num(f.homeDefStrength, 0.5), 0), 1); // cÃ¢t de â€žsitÄƒâ€ e apÄƒrarea gazdelor
 
     const homeLambda = Math.max(0.2, baseHome * (0.9 + defH * 0.4));
     const awayLambda = Math.max(0.2, baseAway * (0.9 + defA * 0.4));

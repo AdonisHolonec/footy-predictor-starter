@@ -2,7 +2,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 // forÈ›eazÄƒ Node 20 pe Vercel
-export const config = { runtime: 'nodejs20.x' };
+export const config = { runtime: 'nodejs' };
 
 const allowed = (process.env.FOOTY_ALLOWED_PATHS || '')
   .split(',')
