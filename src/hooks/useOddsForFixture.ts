@@ -1,37 +1,24 @@
 import { useEffect, useState } from "react";
 
-export type OddsResponse = any;
-
-export function useOddsForFixture(fixtureId: number) {
-  const [data, setData] = useState<OddsResponse | null>(null);
-  const [loading, setLoading] = useState(false);
+export function useOddsForFixture(fetchUrl: string) {
+  const [data, setData] = useState<any | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    let alive = true;
-    async function run() {
-      setLoading(true);
-      setError(null);
+    let cancelled = false;
+    (async () => {
       try {
-        const res = await fetch(
-          `/api/footy-predictor?path=/odds&fixture=${fixtureId}`
-        );
-        if (!res.ok) {
-          const txt = await res.text();
-          throw new Error(`HTTP ${res.status}: ${txt}`);
-        }
-        const json = await res.json();
-        if (alive) setData(json);
+        const res = await fetch(`${fetchUrl}?ts=${Date.now()}`, { headers: { Accept: "application/json" }, cache: "no-store" });
+        const txt = await res.text();
+        if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText} — ${txt.slice(0,180)}`);
+        const json = txt ? JSON.parse(txt) : null;
+        if (!cancelled) setData(json);
       } catch (e: any) {
-        console.error("[useOddsForFixture]", e);
-        if (alive) setError(e?.message ?? "Unknown error");
-      } finally {
-        if (alive) setLoading(false);
+        if (!cancelled) setError(String(e?.message || e));
       }
-    }
-    if (fixtureId) run();
-    return () => { alive = false; };
-  }, [fixtureId]);
+    })();
+    return () => { cancelled = true; };
+  }, [fetchUrl]);
 
-  return { data, loading, error };
+  return { data, error };
 }

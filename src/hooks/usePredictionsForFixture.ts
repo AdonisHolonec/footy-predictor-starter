@@ -1,37 +1,23 @@
 import { useEffect, useState } from "react";
+import { getPredictions } from "../lib/api";
 
-export type PredictionsResponse = any; // folosește tipul tău aici
-
-export function usePredictionsForFixture(fixtureId: number) {
-  const [data, setData] = useState<PredictionsResponse | null>(null);
-  const [loading, setLoading] = useState(false);
+export function usePredictionsForFixture(fixtureId: string) {
+  const [data, setData] = useState<any | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    let alive = true;
-    async function run() {
-      setLoading(true);
-      setError(null);
+    let cancelled = false;
+    (async () => {
       try {
-        const res = await fetch(
-          `/api/footy-predictor?path=/predictions&fixture=${fixtureId}`
-        );
-        if (!res.ok) {
-          const txt = await res.text();
-          throw new Error(`HTTP ${res.status}: ${txt}`);
-        }
-        const json = await res.json();
-        if (alive) setData(json);
+        const all = await getPredictions();
+        const one = all.find((x: any) => x.id === fixtureId) ?? null;
+        if (!cancelled) setData(one);
       } catch (e: any) {
-        console.error("[usePredictionsForFixture]", e);
-        if (alive) setError(e?.message ?? "Unknown error");
-      } finally {
-        if (alive) setLoading(false);
+        if (!cancelled) setError(String(e?.message || e));
       }
-    }
-    if (fixtureId) run();
-    return () => { alive = false; };
+    })();
+    return () => { cancelled = true; };
   }, [fixtureId]);
 
-  return { data, loading, error };
+  return { data, error };
 }

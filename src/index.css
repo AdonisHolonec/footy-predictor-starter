@@ -1,147 +1,27 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* restul stilurilor tale (variabile, .btn-*, etc.) */
-
-/* Paletă mică pt. “Inter Blue” folosită în headerul ADVICE */
-:root{
-  --inter-blue-50:  #eef5ff;
-  --inter-blue-900: #0b4ad1;
+@layer base {
+  html, body, #root {
+    height: 100%;
+    background: #F9FAFB;
+    font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto,
+      'Helvetica Neue', Arial, 'Noto Sans', 'Liberation Sans', sans-serif;
+  }
+  body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
 }
 
-/* Utils simple ca în Tailwind (neutrale cu CSS clasic) */
-.bg-interblue-50  { background-color: var(--inter-blue-50); }
-.text-interblue-900{ color: var(--inter-blue-900); }
-
-/* ---- Butoane ---- */
-.btn-primary{
-  @apply rounded-xl px-4 py-2 font-medium text-white;
-  background:#3b82f6;
-  box-shadow: 0 4px 14px rgba(59,130,246,.25);
-}
-.btn-primary:disabled{ opacity:.6; cursor:not-allowed; }
-.btn-primary:hover{ filter:brightness(1.05); }
-
-.btn-dark{
-  @apply rounded-xl px-4 py-2 font-medium text-white;
-  background:#0f172a; /* slate-900 */
-}
-.btn-dark:hover{ filter:brightness(1.05); }
-
-/* ---- Card & header „teren” ---- */
-.card{
-  background:#fff;
-  border:1px solid #e5e7eb; /* slate-200 */
-  border-radius: 16px;
-  box-shadow: 0 8px 22px rgba(2,6,23,.06);
-  overflow:hidden;
-}
-.pitch-header{
-  background:
-    repeating-linear-gradient(
-      to right,
-      rgba(59,130,246,.12) 0, rgba(59,130,246,.12) 8px,
-      transparent 8px, transparent 16px
-    );
-  border-bottom:1px solid #e5e7eb;
+@layer components {
+  .card { @apply bg-white rounded-2xl shadow p-4; }
+  .card-hover { @apply transition-transform hover:scale-[1.01]; }
+  .badge-green { @apply inline-block text-sm px-2 py-1 rounded bg-green-100 text-green-700; }
+  .badge-blue  { @apply inline-block text-sm px-2 py-1 rounded bg-blue-100  text-blue-700; }
+  .badge-gray  { @apply inline-block text-sm px-2 py-1 rounded bg-gray-100  text-gray-700; }
+  .badge-red   { @apply inline-block text-sm px-2 py-1 rounded bg-red-100   text-red-700; }
 }
 
-/* ---- Progress „Încredere” ---- */
-.progress{
-  height:10px;
-  background:#f1f5f9;           /* slate-100 */
-  border-radius:999px;
-  overflow:hidden;
-}
-.progress-bar{
-  height:100%;
-  background:#16a34a;          /* green-600 */
-}
-
-/* ---- Box piețe (GG/NGG, OU, DC etc.) ---- */
-.market-box{
-  border:1px solid #e5e7eb;
-  border-radius:16px;
-  padding:14px;
-  background:#fff;
-}
-.market-title{
-  font-weight:600;
-  color:#0f172a;                /* slate-900 */
-  margin-bottom:10px;
-}
-.market-row{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:12px;
-  font-size:14px;
-}
-.pct{
-  color:#64748b;                /* slate-500 */
-  font-variant-numeric: tabular-nums;
-}
-.odd{
-  min-width:3.2rem;
-  text-align:right;
-  font-weight:600;
-  color:#0f172a;
-}
-
-/* ---- Badge-uri ---- */
-.chip-best{
-  display:inline-block;
-  padding:2px 8px;
-  border-radius:999px;
-  font-size:12px;
-  background:#eafff1;
-  color:#16a34a;
-  border:1px solid #bbf7d0;     /* green-200 */
-}
-.chip-cache{
-  display:inline-block;
-  padding:2px 8px;
-  border-radius:999px;
-  font-size:12px;
-  background:#f1f5f9;           /* slate-100 */
-  color:#334155;                /* slate-700 */
-  border:1px solid #e2e8f0;     /* slate-200 */
-}
-
-/* ---- Bife ✓ și X ---- */
-.mark-ok{
-  display:inline-block;
-  font-weight:700;
-  color:#16a34a;                /* green-600 */
-}
-.mark-bad{
-  display:inline-block;
-  font-weight:700;
-  color:#dc2626;                /* red-600 */
-}
-
-/* Mic helper pentru listă de scoruri */
-.score-chip{
-  border:1px solid #e5e7eb;
-  border-radius:999px;
-  padding:.25rem .75rem;
-  background:#fff;
-}
-/* --- compacte pentru toolbar --- */
-.btn-compact{
-  padding: 0.5rem 0.9rem;
-  font-size: .9rem;
-  border-radius: .75rem;
-  line-height: 1.1;
-}
-.input-compact{
-  padding: .45rem .6rem;
-  font-size: .9rem;
-}
-.field{
-  display: flex;
-  flex-direction: column;
-  gap: .25rem;
-  min-width: 0; /* previne overflow în grid */
-}
+@keyframes fadeIn { from { opacity:0; transform: translateY(4px);} to {opacity:1; transform: translateY(0);} }
+.animate-fadeIn { animation: fadeIn .35s ease-out both; }
