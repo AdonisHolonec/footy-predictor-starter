@@ -1,18 +1,29 @@
-// src/lib/api.ts
-import { DEMO_PREDICTIONS } from "../demo/predictions";
+export type GetPredParams = {
+  date: string;               // "YYYY-MM-DD"
+  leagueIds: string[];        // ["283","39",...]
+  limit?: number;
+};
 
-export async function getPredictions() {
-  const isLocal = import.meta.env.DEV || location.hostname === "localhost";
-  if (isLocal) return DEMO_PREDICTIONS;
+export async function getPredictions(p: GetPredParams) {
+  const url = `/api/predict?date=${encodeURIComponent(p.date)}&leagueIds=${encodeURIComponent(p.leagueIds.join(","))}&limit=${p.limit ?? 80}`;
+  const r = await fetch(url, { headers:{Accept:"application/json"} });
+  const data = await r.json();
+  // marcăm sursa pt. debug
+  console.log("[Footy] source=API", { len: data?.length ?? 0, date: p.date, leagues: p.leagueIds });
+  return data;
+}
 
+export async function saveGlobalReco(date: string, items: any[]) {
   try {
-    const r = await fetch(`/api/predict?ts=${Date.now()}`, {
-      headers: { Accept: "application/json" },
-      cache: "no-store",
+    await fetch("/api/reco", {
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ date, items })
     });
-    if (!r.ok) throw new Error(`API ${r.status}`);
-    return r.json();
-  } catch {
-    return DEMO_PREDICTIONS;
-  }
+  } catch {}
+}
+
+export async function getGlobalRecoStats(from: string, to: string) {
+  const r = await fetch(`/api/reco?from=${from}&to=${to}`, { headers:{Accept:"application/json"} });
+  return await r.json();
 }

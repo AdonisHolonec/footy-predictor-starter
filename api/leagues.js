@@ -1,78 +1,49 @@
-// api/leagues.js
-const BASE = process.env.APIFOOTBALL_BASE || "https://apiv3.apifootball.com/?action=";
-const KEY  = process.env.APIFOOTBALL_KEY;
+// api/leagues.js  —  lists leagues via API-FOOTBALL (RapidAPI)
+const BASE = process.env.UPSTREAM_BASE_URL || "https://api-football-v1.p.rapidapi.com/v3";
+const KEY  = process.env.X_RAPIDAPI_KEY;
+const HOST = process.env.X_RAPIDAPI_HOST || "api-football-v1.p.rapidapi.com";
+const TIMEOUT = Number(process.env.UPSTREAM_TIMEOUT_MS || "7000");
 
 function norm(s = "") { return s.toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "").trim(); }
 
-async function fetchJSON(url) {
-  const r = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store" });
-  const t = await r.text();
-  if (!r.ok) throw new Error(`HTTP ${r.status} — ${t.slice(0,180)}`);
-  let j; try { j = JSON.parse(t); } catch { throw new Error("Invalid JSON"); }
-  if (j && !Array.isArray(j) && (j.error || j.message || j.success === 0)) throw new Error(String(j.error || j.message));
-  return j;
+async function rapid(path) {
+  const ctl = new AbortController();
+  const id = setTimeout(() => ctl.abort(), TIMEOUT);
+  const r = await fetch(`${BASE}${path}`, {
+    headers: { "X-RapidAPI-Key": KEY, "X-RapidAPI-Host": HOST, Accept: "application/json" },
+    cache: "no-store",
+    signal: ctl.signal,
+  });
+  clearTimeout(id);
+  const text = await r.text();
+  if (!r.ok) throw new Error(`${r.status} ${text.slice(0,180)}`);
+  const j = JSON.parse(text);
+  return j.response || [];
 }
 
 export default async function handler(req, res) {
-  res.setHeader("Content-Type","application/json");
-  res.setHeader("Cache-Control","no-store");
+  res.setHeader("Content-Type", "application/json");
+  res.setHeader("Cache-Control", "no-store");
 
-  const u = new URL(req.url, `http://${req.headers.host}`);
-  const countryQ = norm(u.searchParams.get("country") || "");
-  const nameQ    = norm(u.searchParams.get("name") || "");
-  const debug    = u.searchParams.get("debug") === "1";
-
-  const meta = {};
   try {
-    if (!KEY) { meta.reason = "missing_key"; return send(res, [], debug, meta); }
+    if (!KEY) return res.status(200).send(JSON.stringify([]));
 
-    let leagues = [];
-    let used = "";
+    const u = new URL(req.url, `http://${req.headers.host}`);
+    const countryQ = norm(u.searchParams.get("country") || ""); // ex: romania
+    const nameQ    = norm(u.searchParams.get("name") || "");    // ex: liga
 
-    // 1) încercăm varianta corectă: country -> country_id -> get_leagues
-    if (countryQ) {
-      try {
-        used = "countries+leagues_by_country_id";
-        const countries = await fetchJSON(`${BASE}get_countries&APIkey=${KEY}`);
-        const match = countries.find(c => {
-          const n = norm(c.country_name || "");
-          return n === countryQ || n.includes(countryQ);
-        });
-        if (match) {
-          const countryId = match.country_id || match.id;
-          leagues = await fetchJSON(`${BASE}get_leagues&country_id=${countryId}&APIkey=${KEY}`);
-        } else {
-          meta.countryNotFound = true;
-        }
-      } catch (e) {
-        meta.firstPathError = String(e);
-      }
-    }
-
-    // 2) fallback: ia TOATE ligile și filtrează local
-    if (!leagues.length) {
-      used = "all_leagues_fallback";
-      try {
-        leagues = await fetchJSON(`${BASE}get_leagues&APIkey=${KEY}`);
-      } catch (e) {
-        meta.fallbackError = String(e);
-        return send(res, [], debug, { ...meta, used });
-      }
-    }
-
-    if (nameQ) leagues = leagues.filter(l => norm(l.league_name || "").includes(nameQ));
-    const out = leagues.map(l => ({
-      league_id: String(l.league_id || l.leagueid || l.id),
-      league_name: l.league_name,
-      country_name: l.country_name
+    const rows = await rapid("/leagues"); // mare dar sigur
+    let out = rows.map(x => ({
+      league_id: String(x.league?.id),
+      league_name: x.league?.name,
+      country_name: x.country?.name,
     }));
-    return send(res, out, debug, { ...meta, used, count: out.length });
-  } catch (e) {
-    return send(res, [], debug, { catch: String(e) });
-  }
-}
 
-function send(res, data, debug, meta) {
-  if (debug) return res.status(200).send(JSON.stringify({ meta, data }));
-  return res.status(200).send(JSON.stringify(data));
+    if (countryQ) out = out.filter(x => norm(x.country_name).includes(countryQ));
+    if (nameQ)    out = out.filter(x => norm(x.league_name).includes(nameQ));
+
+    return res.status(200).send(JSON.stringify(out));
+  } catch {
+    return res.status(200).send(JSON.stringify([]));
+  }
 }
