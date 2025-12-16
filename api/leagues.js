@@ -1,49 +1,87 @@
-// api/leagues.js  —  lists leagues via API-FOOTBALL (RapidAPI)
+// api/leagues.js — list leagues via API-FOOTBALL (RapidAPI) + cache Vercel KV
+import { kv } from "@vercel/kv";
+
 const BASE = process.env.UPSTREAM_BASE_URL || "https://api-football-v1.p.rapidapi.com/v3";
 const KEY  = process.env.X_RAPIDAPI_KEY;
 const HOST = process.env.X_RAPIDAPI_HOST || "api-football-v1.p.rapidapi.com";
 const TIMEOUT = Number(process.env.UPSTREAM_TIMEOUT_MS || "7000");
 
-function norm(s = "") { return s.toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "").trim(); }
+// Normalize string: lowercase, remove diacritics, trim
+function norm(s = "") {
+  return s.toLowerCase()
+          .normalize("NFD")
+          .replace(/\p{Diacritic}/gu, "")
+          .trim();
+}
 
+// Fetch wrapper cu timeout și try/catch
 async function rapid(path) {
   const ctl = new AbortController();
   const id = setTimeout(() => ctl.abort(), TIMEOUT);
-  const r = await fetch(`${BASE}${path}`, {
-    headers: { "X-RapidAPI-Key": KEY, "X-RapidAPI-Host": HOST, Accept: "application/json" },
-    cache: "no-store",
-    signal: ctl.signal,
-  });
-  clearTimeout(id);
-  const text = await r.text();
-  if (!r.ok) throw new Error(`${r.status} ${text.slice(0,180)}`);
-  const j = JSON.parse(text);
-  return j.response || [];
-}
-
-export default async function handler(req, res) {
-  res.setHeader("Content-Type", "application/json");
-  res.setHeader("Cache-Control", "no-store");
 
   try {
-    if (!KEY) return res.status(200).send(JSON.stringify([]));
+    const res = await fetch(`${BASE}${path}`, {
+      headers: {
+        "X-RapidAPI-Key": KEY,
+        "X-RapidAPI-Host": HOST,
+        "Accept": "application/json",
+      },
+      cache: "no-store",
+      signal: ctl.signal,
+    });
 
-    const u = new URL(req.url, `http://${req.headers.host}`);
-    const countryQ = norm(u.searchParams.get("country") || ""); // ex: romania
-    const nameQ    = norm(u.searchParams.get("name") || "");    // ex: liga
+    const text = await res.text();
 
-    const rows = await rapid("/leagues"); // mare dar sigur
+    if (!res.ok) throw new Error(`${res.status} ${text.slice(0, 180)}`);
+
+    const json = JSON.parse(text);
+    return json.response || [];
+
+  } catch (err) {
+    console.error("RapidAPI fetch error:", err);
+    return [];
+  } finally {
+    clearTimeout(id);
+  }
+}
+
+// Main handler
+export default async function handler(req, res) {
+  res.setHeader("Content-Type", "application/json");
+  res.setHeader("Cache-Control", "s-maxage=600, stale-while-revalidate=60"); // Edge cache 10min
+
+  if (!KEY) {
+    return res.status(200).json({ error: "API key missing", data: [] });
+  }
+
+  try {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const countryQ = norm(url.searchParams.get("country") || "");
+    const nameQ    = norm(url.searchParams.get("name") || "");
+
+    const cacheKey = "leagues:all";
+    let rows = await kv.get(cacheKey);
+
+    if (!rows) {
+      rows = await rapid("/leagues");
+      if (rows.length > 0) {
+        await kv.set(cacheKey, rows, { ex: 60 * 60 * 24 }); // 24h
+      }
+    }
+
     let out = rows.map(x => ({
-      league_id: String(x.league?.id),
-      league_name: x.league?.name,
-      country_name: x.country?.name,
+      league_id: String(x.league?.id || ""),
+      league_name: x.league?.name || "",
+      country_name: x.country?.name || "",
     }));
 
     if (countryQ) out = out.filter(x => norm(x.country_name).includes(countryQ));
     if (nameQ)    out = out.filter(x => norm(x.league_name).includes(nameQ));
 
-    return res.status(200).send(JSON.stringify(out));
-  } catch {
-    return res.status(200).send(JSON.stringify([]));
+    return res.status(200).json({ error: null, data: out });
+
+  } catch (err) {
+    console.error("Handler error:", err);
+    return res.status(500).json({ error: "Unexpected error", data: [] });
   }
 }
