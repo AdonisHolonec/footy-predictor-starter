@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { getPredictions, saveGlobalReco, getGlobalRecoStats } from "./lib/api";
 import { formatRO, todayISO, addDays } from "./lib/date";
+import StandingsTable from "./components/StandingsTable";
 
 // ligi populare (poți modifica)
 const POPULAR_LEAGUES = [
@@ -35,6 +36,7 @@ function cacheKey(date:string, leagues:string[]){ return `footy:${date}:${league
 
 // ---------- UI ----------
 export default function App(){
+  const [view, setView] = useState<"predictions"|"standings">("predictions");
   const [date, setDate] = useState<string>(todayISO());
   const [selected, setSelected] = useState<string[]>(() => lsGet("footy:selectedLeagues", ["283"]));
   useEffect(()=>{ lsSet("footy:selectedLeagues", selected); },[selected]);
@@ -75,29 +77,63 @@ export default function App(){
   return (
     <div className="min-h-screen bg-[#F5F6F8] p-4 md:p-6"
       style={{ fontFamily:"Inter, ui-sans-serif, system-ui, sans-serif" }}>
-      
+
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <h1 className="text-2xl font-semibold">Footy Predictor — Demo</h1>
         <div className="flex items-center gap-2">
-          <DaySelector date={date} onChange={setDate} />
-          <LeaguePicker selected={selected} onChange={setSelected} />
-          <button className="px-3 py-1.5 rounded-lg bg-blue-600 text-white" onClick={()=>load(true)}>
-            Actualizează
-          </button>
+          <div className="bg-white rounded-2xl shadow p-1 flex gap-1">
+            <button
+              onClick={()=>setView("predictions")}
+              className={`px-3 py-1.5 rounded-lg text-sm ${view==="predictions"?"bg-blue-600 text-white":"bg-white"}`}>
+              Predicții
+            </button>
+            <button
+              onClick={()=>setView("standings")}
+              className={`px-3 py-1.5 rounded-lg text-sm ${view==="standings"?"bg-blue-600 text-white":"bg-white"}`}>
+              Clasament
+            </button>
+          </div>
+          {view === "predictions" && (
+            <>
+              <DaySelector date={date} onChange={setDate} />
+              <LeaguePicker selected={selected} onChange={setSelected} />
+              <button className="px-3 py-1.5 rounded-lg bg-blue-600 text-white" onClick={()=>load(true)}>
+                Actualizează
+              </button>
+            </>
+          )}
         </div>
       </div>
 
-      {stats && (
+      {view === "predictions" && stats && (
         <div className="bg-white rounded-2xl shadow p-3 mb-4 text-sm text-gray-700">
           <b>Istoric recomandate</b> (ultimele 7 zile): W {stats?.stats?.win} / L {stats?.stats?.lose} — Succes {stats?.stats?.rate}% (total {stats?.stats?.total})
         </div>
       )}
 
-      <MatchesTable rows={rows} />
+      {view === "predictions" && <MatchesTable rows={rows} />}
 
-      <div className="mt-3 text-xs text-gray-400">
-        Sursă: {source==="API"?"API live":source==="CACHE"?"cache ziua curentă":"—"} • Data: {date}
-      </div>
+      {view === "standings" && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-2xl shadow p-3">
+            <LeaguePicker selected={selected} onChange={setSelected} />
+          </div>
+          {selected.map(id => (
+            <div key={id}>
+              <h2 className="text-lg font-semibold mb-2 text-gray-700">
+                {POPULAR_LEAGUES.find(l=>l.id===id)?.name || `Liga ${id}`}
+              </h2>
+              <StandingsTable leagueId={id} season={new Date().getFullYear().toString()} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {view === "predictions" && (
+        <div className="mt-3 text-xs text-gray-400">
+          Sursă: {source==="API"?"API live":source==="CACHE"?"cache ziua curentă":"—"} • Data: {date}
+        </div>
+      )}
     </div>
   );
 }
@@ -150,23 +186,33 @@ function MatchesTable({ rows }:{ rows:Item[]|null }){
             <th className="text-left p-3">Ora</th>
             <th className="text-left p-3">Liga</th>
             <th className="text-left p-3">Meci</th>
-            <th className="text-center p-3">1</th>
-            <th className="text-center p-3">X</th>
-            <th className="text-center p-3">2</th>
-            <th className="text-center p-3">GG</th>
-            <th className="text-center p-3">NGG</th>
-            <th className="text-center p-3">O2.5</th>
-            <th className="text-center p-3">U2.5</th>
+            <th className="text-center p-3" title="Predicție model">1 (%)</th>
+            <th className="text-center p-3" title="Predicție model">X (%)</th>
+            <th className="text-center p-3" title="Predicție model">2 (%)</th>
+            <th className="text-center p-3" title="Predicție GG">GG (%)</th>
+            <th className="text-center p-3" title="Predicție Over 2.5">O2.5 (%)</th>
             <th className="text-center p-3">Recomandat</th>
-            <th className="text-center p-3">Vreme</th>
             <th className="text-center p-3">Arbitru</th>
           </tr>
         </thead>
         <tbody>
           {rows.map(r=>{
             const hh = new Date(r.kickoff).toLocaleTimeString("ro-RO",{hour:"2-digit",minute:"2-digit"});
+
+            const p1 = r.probs?.p1 != null ? Math.round(r.probs.p1 * 100) : (r.predictions?.oneXtwo?.conf && r.predictions.oneXtwo.pick === "1" ? r.predictions.oneXtwo.conf : null);
+            const pX = r.probs?.pX != null ? Math.round(r.probs.pX * 100) : (r.predictions?.oneXtwo?.conf && r.predictions.oneXtwo.pick === "X" ? r.predictions.oneXtwo.conf : null);
+            const p2 = r.probs?.p2 != null ? Math.round(r.probs.p2 * 100) : (r.predictions?.oneXtwo?.conf && r.predictions.oneXtwo.pick === "2" ? r.predictions.oneXtwo.conf : null);
+            const pGG = r.probs?.pGG != null ? Math.round(r.probs.pGG * 100) : (r.predictions?.gg?.conf && r.predictions.gg.pick === "GG" ? r.predictions.gg.conf : null);
+            const pO25 = r.probs?.pO25 != null ? Math.round(r.probs.pO25 * 100) : (r.predictions?.over25?.conf && r.predictions.over25.pick === "Peste 2.5" ? r.predictions.over25.conf : null);
+
+            const getBestClass = (val: number|null, vals: (number|null)[]) => {
+              if (val == null) return "";
+              const max = Math.max(...vals.filter(v => v != null) as number[]);
+              return val === max && val > 0 ? "bg-green-100 font-semibold" : "";
+            };
+
             return (
-              <tr key={r.id} className="border-t">
+              <tr key={r.id} className="border-t hover:bg-gray-50">
                 <td className="p-3">{hh}</td>
                 <td className="p-3">
                   <div className="flex items-center gap-2">
@@ -184,35 +230,43 @@ function MatchesTable({ rows }:{ rows:Item[]|null }){
                   </div>
                 </td>
 
-                <td className="text-center p-3">{r.odds?.["1"] ?? "-"}</td>
-                <td className="text-center p-3">{r.odds?.["X"] ?? "-"}</td>
-                <td className="text-center p-3">{r.odds?.["2"] ?? "-"}</td>
-                <td className="text-center p-3">{r.odds?.GG ?? "-"}</td>
-                <td className="text-center p-3">{r.odds?.NGG ?? "-"}</td>
-                <td className="text-center p-3">{r.odds?.O25 ?? "-"}</td>
-                <td className="text-center p-3">{r.odds?.U25 ?? "-"}</td>
+                <td className={`text-center p-3 ${getBestClass(p1, [p1, pX, p2])}`}>
+                  {p1 != null ? `${p1}%` : "-"}
+                  {r.odds?.["1"] && <div className="text-xs text-gray-500">{r.odds["1"]}</div>}
+                </td>
+                <td className={`text-center p-3 ${getBestClass(pX, [p1, pX, p2])}`}>
+                  {pX != null ? `${pX}%` : "-"}
+                  {r.odds?.["X"] && <div className="text-xs text-gray-500">{r.odds["X"]}</div>}
+                </td>
+                <td className={`text-center p-3 ${getBestClass(p2, [p1, pX, p2])}`}>
+                  {p2 != null ? `${p2}%` : "-"}
+                  {r.odds?.["2"] && <div className="text-xs text-gray-500">{r.odds["2"]}</div>}
+                </td>
+                <td className="text-center p-3">
+                  {pGG != null ? `${pGG}%` : "-"}
+                  {r.odds?.GG && <div className="text-xs text-gray-500">{r.odds.GG}</div>}
+                </td>
+                <td className="text-center p-3">
+                  {pO25 != null ? `${pO25}%` : "-"}
+                  {r.odds?.O25 && <div className="text-xs text-gray-500">{r.odds.O25}</div>}
+                </td>
 
                 <td className="text-center p-3">
                   {r.recommended ? (
                     <div className="inline-flex flex-col items-center">
                       <span className="text-xs text-gray-500">{r.recommended.market}</span>
                       <span className="font-medium">{r.recommended.pick}</span>
-                      <span className="text-xs">
-                        conf {r.recommended.conf}% • value {(r.recommended.edge*100).toFixed(0)}%
+                      <span className="text-xs text-gray-600">
+                        {r.recommended.conf}% • @{r.recommended.odd?.toFixed(2)}
+                      </span>
+                      <span className="text-xs text-green-600">
+                        edge {(r.recommended.edge*100).toFixed(0)}%
                       </span>
                     </div>
                   ) : "-"}
                 </td>
 
-                <td className="text-center p-3">
-                  {r.weather ? (
-                    <div className="text-xs">
-                      {r.weather.temp!=null ? `${Math.round(r.weather.temp)}°C` : "-"}
-                      {r.weather.pop!=null ? ` / ${r.weather.pop}%` : ""}
-                    </div>
-                  ) : "-"}
-                </td>
-                <td className="text-center p-3 text-gray-600">{r.referee || "-"}</td>
+                <td className="text-center p-3 text-gray-600 text-xs">{r.referee || "-"}</td>
               </tr>
             );
           })}
