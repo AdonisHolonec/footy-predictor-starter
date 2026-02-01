@@ -1,29 +1,40 @@
-export type GetPredParams = {
-  date: string;               // "YYYY-MM-DD"
-  leagueIds: string[];        // ["283","39",...]
-  limit?: number;
-};
+// src/lib/api.ts
+const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8787/api";
 
-export async function getPredictions(p: GetPredParams) {
-  const url = `/api/predict?date=${encodeURIComponent(p.date)}&leagueIds=${encodeURIComponent(p.leagueIds.join(","))}&limit=${p.limit ?? 80}`;
-  const r = await fetch(url, { headers:{Accept:"application/json"} });
-  const data = await r.json();
-  // marcăm sursa pt. debug
-  console.log("[Footy] source=API", { len: data?.length ?? 0, date: p.date, leagues: p.leagueIds });
-  return data;
+async function getJson<T>(path: string): Promise<T> {
+  const r = await fetch(`${API_BASE}${path}`);
+  if (!r.ok) {
+    const text = await r.text().catch(() => "");
+    throw new Error(`HTTP ${r.status} ${path} :: ${text}`);
+  }
+  return r.json();
 }
 
-export async function saveGlobalReco(date: string, items: any[]) {
-  try {
-    await fetch("/api/reco", {
-      method:"POST",
-      headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify({ date, items })
-    });
-  } catch {}
+export function apiHello() {
+  return getJson<{ ok: boolean }>(`/hello`);
 }
 
-export async function getGlobalRecoStats(from: string, to: string) {
-  const r = await fetch(`/api/reco?from=${from}&to=${to}`, { headers:{Accept:"application/json"} });
-  return await r.json();
+export function apiEnvOk() {
+  return getJson<any>(`/env-ok`);
+}
+
+export function apiUsage() {
+  return getJson<{ ok: boolean; usage: { date: string; count: number; limit: number } }>(`/cache/usage`);
+}
+
+export function apiWarm(date: string, leagueIds: number[]) {
+  const qs = new URLSearchParams({
+    date,
+    leagueIds: leagueIds.join(","),
+  });
+  return getJson<any>(`/warm?${qs.toString()}`);
+}
+
+export function apiPredict(date: string, leagueIds: number[], limit = 20) {
+  const qs = new URLSearchParams({
+    date,
+    leagueIds: leagueIds.join(","),
+    limit: String(limit),
+  });
+  return getJson<any>(`/predict?${qs.toString()}`);
 }

@@ -17,3 +17,4 @@ server/.vercel/
 server/.env
 server/.env.local
 server/.env.*.local
+.vercel
